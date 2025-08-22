@@ -135,7 +135,7 @@ export default function Home() {
           <p>Powered by Claude Code enthusiasm 🤖</p>
           <p>
             <a 
-              href={process.env.NEXT_PUBLIC_GITHUB_URL || "https://github.com/yourusername/i-am-absolutely-right"} 
+              href={`https://github.com/${process.env.VERCEL_GIT_REPO_OWNER}/${process.env.VERCEL_GIT_REPO_SLUG}`} 
               target="_blank" 
               rel="noopener noreferrer"
               className="text-blue-500 hover:text-blue-600 transition-colors underline"

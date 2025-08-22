@@ -28,8 +28,6 @@ cp .env.example .env.development.local
 # Edit .env.development.local with your values:
 # - Set your API_SECRET (generate with: openssl rand -base64 32)
 # - Update COUNTER_API_URL with your domain
-# - Set your GitHub repository URL for the footer link
-# - Set your site URL for Open Graph metadata
 
 # Start local Redis with Docker
 docker-compose up -d
@@ -49,8 +47,8 @@ The following environment variables are required:
 | `API_SECRET` | Secret key for API authentication | `randombase64string` |
 | `REDIS_URL` | Redis connection URL | `redis://default:devpassword@localhost:6379` |
 | `COUNTER_API_URL` | API endpoint for both counters (uses type parameter) | `https://your-domain.com/api/increment` |
-| `NEXT_PUBLIC_GITHUB_URL` | Your GitHub repository URL (shown in footer) | `https://github.com/yourusername/i-am-absolutely-right` |
-| `NEXT_PUBLIC_SITE_URL` | Your deployed site URL (for Open Graph) | `https://your-domain.com` |
+
+**Note**: GitHub URL and site URL are now automatically provided by Vercel's built-in environment variables (`VERCEL_GIT_REPO_OWNER`, `VERCEL_GIT_REPO_SLUG`, `VERCEL_URL`).
 
 Create a `.env.development.local` file with these variables for local development.
 

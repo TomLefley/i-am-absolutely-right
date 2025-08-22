@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "You're Absolutely Right! Counter",
     description: 'A fun counter tracking Claude Code\'s favorite phrase',
-    url: process.env.NEXT_PUBLIC_SITE_URL || 'https://your-domain.com',
+    url: `https://${process.env.VERCEL_URL}`,
     siteName: "You're Absolutely Right! Counter",
     type: 'website',
   },
