@@ -5,11 +5,10 @@ export const metadata: Metadata = {
   title: "You're Absolutely Right! Counter",
   description: 'Counting how many times Claude Code says "You\'re absolutely right!"',
   keywords: ['claude', 'code', 'counter', 'ai', 'assistant'],
-  authors: [{ name: 'Tom Lefley' }],
   openGraph: {
     title: "You're Absolutely Right! Counter",
     description: 'A fun counter tracking Claude Code\'s favorite phrase',
-    url: 'https://absolutely-right.lefley.dev',
+    url: process.env.NEXT_PUBLIC_SITE_URL || 'https://your-domain.com',
     siteName: "You're Absolutely Right! Counter",
     type: 'website',
   },

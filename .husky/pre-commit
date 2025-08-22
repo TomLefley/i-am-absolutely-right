@@ -1,0 +1,13 @@
+echo "🔨 Running pre-commit checks..."
+
+# Run build to catch TypeScript errors and build issues
+echo "📦 Building project..."
+npm run build
+
+# If build fails, prevent commit
+if [ $? -ne 0 ]; then
+  echo "❌ Build failed! Please fix the errors before committing."
+  exit 1
+fi
+
+echo "✅ Build successful! Proceeding with commit."

@@ -3,6 +3,18 @@ import { createClient } from 'redis'
 
 export async function POST(request: NextRequest) {
   try {
+    // Parse request body to get counter type
+    const body = await request.json()
+    const { type = 'right' } = body
+    
+    // Validate counter type
+    if (!['right', 'issue'].includes(type)) {
+      return NextResponse.json(
+        { error: 'Invalid counter type. Must be "right" or "issue"' },
+        { status: 400 }
+      )
+    }
+    
     // Check if Redis is available
     if (!process.env.REDIS_URL) {
       return NextResponse.json(
@@ -45,17 +57,22 @@ export async function POST(request: NextRequest) {
       // Get current date for daily tracking
       const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD format
       
+      // Set Redis keys based on counter type
+      const totalKey = type === 'right' ? 'counter:total' : 'issue-counter:total'
+      const dailyKey = type === 'right' ? `daily:${today}` : `issue-daily:${today}`
+      
       // Increment counters atomically
       const [newTotal, newDailyCount] = await Promise.all([
-        redis.incr('counter:total'),
-        redis.incr(`daily:${today}`)
+        redis.incr(totalKey),
+        redis.incr(dailyKey)
       ])
 
       // Set TTL for daily counters (60 days)
-      await redis.expire(`daily:${today}`, 60 * 24 * 60 * 60)
+      await redis.expire(dailyKey, 60 * 24 * 60 * 60)
       
       return NextResponse.json({
         success: true,
+        type,
         total: newTotal,
         dailyCount: newDailyCount,
         date: today

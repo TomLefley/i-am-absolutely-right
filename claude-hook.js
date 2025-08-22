@@ -57,9 +57,10 @@ function loadEnvFile() {
 loadEnvFile();
 
 // Configuration
-const API_URL = process.env.COUNTER_API_URL || 'https://absolutely-right.lefley.dev/api/increment';
+const API_URL = process.env.COUNTER_API_URL || 'https://your-domain.com/api/increment';
 const API_SECRET = process.env.API_SECRET;
 const TRIGGER_PHRASE = "You're absolutely right!";
+const ISSUE_PATTERN = /(?:now\s+)?i\s+(?:can\s+)?(?:see|understand|get|found|spot|spotted)\s+the\s+(?:issue|problem|bug)/i;
 
 // Validate configuration
 if (!API_SECRET) {
@@ -67,8 +68,8 @@ if (!API_SECRET) {
   process.exit(1);
 }
 
-function makeAPIRequest(data, callback) {
-  const parsedUrl = url.parse(API_URL);
+function makeAPIRequest(apiUrl, data, callback) {
+  const parsedUrl = url.parse(apiUrl);
   const isHttps = parsedUrl.protocol === 'https:';
   const client = isHttps ? https : http;
   
@@ -116,17 +117,20 @@ function makeAPIRequest(data, callback) {
   req.end();
 }
 
-function incrementCounter() {
-  console.log('🎯 Detected "You\'re absolutely right!" - incrementing counter...');
+function incrementCounter(type = 'right') {
+  const phraseName = type === 'right' ? '"You\'re absolutely right!"' : 'issue phrase';
+  const emoji = type === 'right' ? '🎯' : '🔍';
   
-  makeAPIRequest({}, (error, response, statusCode) => {
+  console.log(`${emoji} Detected ${phraseName} - incrementing ${type} counter...`);
+  
+  makeAPIRequest(API_URL, { type }, (error, response, statusCode) => {
     if (error) {
-      console.error('❌ Failed to increment counter:', error.message);
+      console.error(`❌ Failed to increment ${type} counter:`, error.message);
       return;
     }
     
     if (statusCode === 200 || statusCode === 201) {
-      console.log(`✅ Counter incremented! New total: ${response.total || 'unknown'}`);
+      console.log(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} counter incremented! New total: ${response.total || 'unknown'}`);
     } else {
       console.error(`❌ API returned status ${statusCode}:`, response);
     }
@@ -214,32 +218,45 @@ function processInput() {
               .join(' ');
           }
           
-          // Check for the trigger phrase
+          // Check for both trigger phrases
+          let foundAny = false;
+          
+          // Check for "absolutely right" phrase
           if (textContent.includes(TRIGGER_PHRASE)) {
             const matches = (textContent.match(new RegExp(TRIGGER_PHRASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
             
             console.log(`🎯 Found "${TRIGGER_PHRASE}" ${matches} time(s) in message ${messageId}`);
             
             for (let i = 0; i < matches; i++) {
-              incrementCounter();
+              incrementCounter('right');
             }
-            
-            // Mark this message as processed
-            processedMessageIds.add(messageId);
-            saveProcessedIds(processedMessageIds);
-          } else {
-            // Still mark as processed to avoid checking again
-            processedMessageIds.add(messageId);
-            saveProcessedIds(processedMessageIds);
+            foundAny = true;
           }
+          
+          // Check for issue detection phrases
+          const issueMatches = textContent.match(ISSUE_PATTERN);
+          if (issueMatches && issueMatches.length > 0) {
+            console.log(`🔍 Found issue detection phrase "${issueMatches[0]}" in message ${messageId}`);
+            incrementCounter('issue');
+            foundAny = true;
+          }
+          
+          // Mark this message as processed
+          processedMessageIds.add(messageId);
+          saveProcessedIds(processedMessageIds);
         }
       } else {
         // Fallback: treat input as plain text (for manual testing)
         if (buffer.includes(TRIGGER_PHRASE)) {
           const matches = (buffer.match(new RegExp(TRIGGER_PHRASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
           for (let i = 0; i < matches; i++) {
-            incrementCounter();
+            incrementCounter('right');
           }
+        }
+        
+        const issueMatches = buffer.match(ISSUE_PATTERN);
+        if (issueMatches && issueMatches.length > 0) {
+          incrementCounter('issue');
         }
       }
     } catch (error) {
@@ -248,8 +265,13 @@ function processInput() {
       if (buffer.includes(TRIGGER_PHRASE)) {
         const matches = (buffer.match(new RegExp(TRIGGER_PHRASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
         for (let i = 0; i < matches; i++) {
-          incrementCounter();
+          incrementCounter('right');
         }
+      }
+      
+      const issueMatches = buffer.match(ISSUE_PATTERN);
+      if (issueMatches && issueMatches.length > 0) {
+        incrementCounter('issue');
       }
     }
   });
@@ -260,26 +282,36 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   
   if (args.includes('--test')) {
-    console.log('🧪 Testing counter increment...');
-    incrementCounter();
+    console.log('🧪 Testing right counter increment...');
+    incrementCounter('right');
+  } else if (args.includes('--test-issue')) {
+    console.log('🧪 Testing issue counter increment...');
+    incrementCounter('issue');
   } else if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-Claude Code Hook - "You're Absolutely Right!" Counter
+Claude Code Hook - Claude Phrase Tracker
 
 Environment Variables:
-  COUNTER_API_URL      API endpoint URL (default: https://absolutely-right.lefley.dev/api/increment)
-  COUNTER_API_SECRET   API secret token (required)
+  COUNTER_API_URL      API endpoint for both phrase types (default: https://your-domain.com/api/increment)
+  API_SECRET           API secret token (required)
+
+Tracked Phrases:
+  - "You're absolutely right!"
+  - "I can see the issue" (and variations)
 
 Usage:
   node claude-hook.js               # Run as hook (reads from stdin)
-  node claude-hook.js --test        # Test API connection
+  node claude-hook.js --test        # Test "absolutely right" counter API
+  node claude-hook.js --test-issue  # Test issue detection counter API
   node claude-hook.js --help        # Show this help
 
 As Claude Code Hook:
   Configure this script as a post-output hook in your Claude Code settings.
     `);
   } else {
-    console.log('🔍 Monitoring Claude Code output for "You\'re absolutely right!"...');
+    console.log('🔍 Monitoring Claude Code output for tracked phrases...');
+    console.log('   - "You\'re absolutely right!"');
+    console.log('   - Issue detection phrases');
     console.log('   Press Ctrl+C to stop');
     processInput();
   }
