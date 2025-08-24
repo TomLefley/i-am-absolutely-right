@@ -68,14 +68,48 @@ Create a `.env.development.local` file with these variables for local developmen
 
 ## Claude Code Hook
 
+The `claude-hook.js` script automatically detects phrases and increments counters via API calls. It uses different environment files based on context:
+
+### Environment Configuration
+
+- **Production (Claude Hook)**: Uses `.env.production.local` 
+- **Development (Testing)**: Uses `.env.development.local`
+
+Create both files with appropriate settings (you can use `vercel env pull` if you have set up environment variables in vercel for your deployment):
+
+**.env.development.local** (for local testing):
+```bash
+API_SECRET=your_dev_secret_here
+COUNTER_API_URL=http://localhost:3000/api/increment
+```
+
+**.env.production.local** (for Claude Code hook):
+```bash
+API_SECRET=your_prod_secret_here
+COUNTER_API_URL=https://your-domain.com/api/increment
+```
+
+### Setup Hook in Claude Code
+
 Use the Claude Code hooks wizard to add a `Stop` event hook:
 
-**Command**: `/path/to/your/project/claude-hook.js`
+**Command**: `NODE_ENV=production /path/to/your/project/claude-hook.js`
 
-Or test manually:
+### Testing
+
+Test the hook locally against your development server:
 ```bash
-node claude-hook.js --test
+# Test "absolutely right" counter
+NODE_ENV=development node claude-hook.js --test
+
+# Test issue detection counter  
+NODE_ENV=development node claude-hook.js --test-issue
+
+# Show help
+node claude-hook.js --help
 ```
+
+The script automatically sets `NODE_ENV=development` for test commands and `NODE_ENV=production` for normal hook execution.
 
 ## License
 

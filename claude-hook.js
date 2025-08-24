@@ -20,41 +20,19 @@ const http = require('http');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
 
-// Load environment variables from .env.development.local
-function loadEnvFile() {
-  // Use absolute path to the hook's directory, not the current working directory
-  const scriptDir = path.dirname(path.resolve(__filename));
-  const envPath = path.join(scriptDir, '.env.development.local');
-  try {
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, 'utf8');
-      const lines = envContent.split('\n');
-      
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) {
-          const [key, ...valueParts] = trimmed.split('=');
-          if (key && valueParts.length > 0) {
-            let value = valueParts.join('=');
-            // Remove surrounding quotes if present
-            if ((value.startsWith('"') && value.endsWith('"')) || 
-                (value.startsWith("'") && value.endsWith("'"))) {
-              value = value.slice(1, -1);
-            }
-            process.env[key] = value;
-          }
-        }
-      }
-      console.log('✅ Loaded environment from .env.development.local');
-    }
-  } catch (error) {
-    console.log('⚠️ Could not load .env.development.local:', error.message);
-  }
+// Set NODE_ENV=production when running as Claude hook
+if (!process.env.NODE_ENV) {
+  const args = process.argv.slice(2);
+  const isTestCommand = args.includes('--test') || args.includes('--test-issue') || args.includes('--help') || args.includes('-h');
+  process.env.NODE_ENV = isTestCommand ? 'development' : 'production';
 }
 
-// Load env file first
-loadEnvFile();
+// Load environment variables with dotenv from script directory
+const scriptDir = path.dirname(path.resolve(__filename));
+dotenv.config({ path: path.join(scriptDir, '.env') });
+dotenv.config({ path: path.join(scriptDir, `.env.${process.env.NODE_ENV}.local`) });
 
 // Configuration
 const API_URL = process.env.COUNTER_API_URL || 'https://your-domain.com/api/increment';
@@ -64,82 +42,67 @@ const ISSUE_PATTERN = /(?:now\s+)?i\s+(?:can\s+)?(?:see|understand|get|found|spo
 
 // Validate configuration
 if (!API_SECRET) {
-  console.error('❌ COUNTER_API_SECRET environment variable is required');
+  console.error('❌ API_SECRET environment variable is required');
   process.exit(1);
 }
 
-function makeAPIRequest(apiUrl, data, callback) {
-  const parsedUrl = url.parse(apiUrl);
-  const isHttps = parsedUrl.protocol === 'https:';
-  const client = isHttps ? https : http;
-  
-  const postData = JSON.stringify(data);
-  
-  const options = {
-    hostname: parsedUrl.hostname,
-    port: parsedUrl.port || (isHttps ? 443 : 80),
-    path: parsedUrl.path,
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(postData),
-      'Authorization': `Bearer ${API_SECRET}`,
-      'User-Agent': 'Claude-Code-Hook/1.0'
-    }
-  };
+let allMessages = [];
 
-  const req = client.request(options, (res) => {
-    let body = '';
-    res.on('data', (chunk) => {
-      body += chunk;
-    });
+
+function makeAPIRequest(data) {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = url.parse(API_URL);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const client = isHttps ? https : http;
     
-    res.on('end', () => {
-      try {
-        const response = JSON.parse(body);
-        callback(null, response, res.statusCode);
-      } catch (error) {
-        callback(new Error(`Failed to parse response: ${body}`), null, res.statusCode);
+    const postData = JSON.stringify(data);
+    
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.path,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData),
+        'Authorization': `Bearer ${API_SECRET}`,
+        'User-Agent': 'Claude-Code-Hook/1.0'
       }
+    };
+
+    // Making API request
+    const req = client.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      
+      res.on('end', () => {
+        try {
+          const response = JSON.parse(body);
+          resolve({ response, statusCode: res.statusCode });
+        } catch (error) {
+          reject(new Error(`Failed to parse response: ${body}`));
+        }
+      });
     });
-  });
 
-  req.on('error', (error) => {
-    callback(error, null, null);
-  });
+    req.on('error', (error) => {
+      reject(error);
+    });
 
-  req.setTimeout(10000, () => {
-    req.destroy();
-    callback(new Error('Request timeout'), null, null);
-  });
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
 
-  req.write(postData);
-  req.end();
-}
-
-function incrementCounter(type = 'right') {
-  const phraseName = type === 'right' ? '"You\'re absolutely right!"' : 'issue phrase';
-  const emoji = type === 'right' ? '🎯' : '🔍';
-  
-  console.log(`${emoji} Detected ${phraseName} - incrementing ${type} counter...`);
-  
-  makeAPIRequest(API_URL, { type }, (error, response, statusCode) => {
-    if (error) {
-      console.error(`❌ Failed to increment ${type} counter:`, error.message);
-      return;
-    }
-    
-    if (statusCode === 200 || statusCode === 201) {
-      console.log(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} counter incremented! New total: ${response.total || 'unknown'}`);
-    } else {
-      console.error(`❌ API returned status ${statusCode}:`, response);
-    }
+    req.write(postData);
+    req.end();
   });
 }
 
 // Track processed messages to prevent duplicates
 // Use absolute path to the hook's directory, not the current working directory
-const scriptDir = path.dirname(path.resolve(__filename));
 const PROCESSED_IDS_FILE = path.join(scriptDir, '.processed-messages.json');
 
 function loadProcessedIds() {
@@ -149,7 +112,7 @@ function loadProcessedIds() {
       return new Set(data);
     }
   } catch (error) {
-    console.log('⚠️ Could not load processed message IDs:', error.message);
+    // Could not load processed message IDs
   }
   return new Set();
 }
@@ -158,7 +121,7 @@ function saveProcessedIds(processedIds) {
   try {
     fs.writeFileSync(PROCESSED_IDS_FILE, JSON.stringify([...processedIds]));
   } catch (error) {
-    console.log('⚠️ Could not save processed message IDs:', error.message);
+    // Could not save processed message IDs
   }
 }
 
@@ -173,11 +136,11 @@ function processInput() {
     buffer += data.toString();
   });
 
-  process.stdin.on('end', () => {
+  process.stdin.on('end', async () => {
     try {
       // Parse the JSON input from Claude Code
       const hookData = JSON.parse(buffer);
-      
+
       if (hookData.transcript_path) {
         // Read the JSONL transcript file
         const transcriptContent = fs.readFileSync(hookData.transcript_path, 'utf8');
@@ -196,19 +159,21 @@ function processInput() {
           }
         }
         
-        // Get the last assistant message
-        const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
+        // Process all unprocessed assistant messages
+        let allApiPromises = [];
+        let rightCount = 0;
+        let issueCount = 0;
+        let lastIssuePhrase = '';
         
-        if (lastAssistantMessage && lastAssistantMessage.message) {
-          const messageId = lastAssistantMessage.uuid;
-          const message = lastAssistantMessage.message;
+        for (const assistantMessage of assistantMessages) {
+          const messageId = assistantMessage.uuid;
+          const message = assistantMessage.message;
           
           // Skip if we've already processed this message
           if (processedMessageIds.has(messageId)) {
-            console.log(`🔄 Already processed message ${messageId}`);
-            return;
+            continue;
           }
-          
+
           // Extract text content from the message
           let textContent = '';
           if (message.content && Array.isArray(message.content)) {
@@ -218,61 +183,66 @@ function processInput() {
               .join(' ');
           }
           
-          // Check for both trigger phrases
-          let foundAny = false;
-          
           // Check for "absolutely right" phrase
           if (textContent.includes(TRIGGER_PHRASE)) {
             const matches = (textContent.match(new RegExp(TRIGGER_PHRASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-            
-            console.log(`🎯 Found "${TRIGGER_PHRASE}" ${matches} time(s) in message ${messageId}`);
+            rightCount += matches;
             
             for (let i = 0; i < matches; i++) {
-              incrementCounter('right');
+              allApiPromises.push(makeAPIRequest({type: 'right'}));
             }
-            foundAny = true;
           }
           
           // Check for issue detection phrases
           const issueMatches = textContent.match(ISSUE_PATTERN);
           if (issueMatches && issueMatches.length > 0) {
-            console.log(`🔍 Found issue detection phrase "${issueMatches[0]}" in message ${messageId}`);
-            incrementCounter('issue');
-            foundAny = true;
+            issueCount++;
+            lastIssuePhrase = issueMatches[0];
+            allApiPromises.push(makeAPIRequest({type: 'issue'}));
           }
           
           // Mark this message as processed
           processedMessageIds.add(messageId);
-          saveProcessedIds(processedMessageIds);
         }
-      } else {
-        // Fallback: treat input as plain text (for manual testing)
-        if (buffer.includes(TRIGGER_PHRASE)) {
-          const matches = (buffer.match(new RegExp(TRIGGER_PHRASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-          for (let i = 0; i < matches; i++) {
-            incrementCounter('right');
+        
+        // Build accumulated messages
+        if (rightCount > 0) {
+          allMessages.push(`🎯 Detected "${TRIGGER_PHRASE}" ${rightCount} time(s)!`);
+        }
+        if (issueCount > 0) {
+          if (issueCount === 1) {
+            allMessages.push(`🔍 Detected issue phrase: "${lastIssuePhrase}"!`);
+          } else {
+            allMessages.push(`🔍 Detected ${issueCount} issue phrases!`);
           }
         }
         
-        const issueMatches = buffer.match(ISSUE_PATTERN);
-        if (issueMatches && issueMatches.length > 0) {
-          incrementCounter('issue');
+        // Wait for all API requests to complete
+        if (allApiPromises.length > 0) {
+          await Promise.all(allApiPromises).catch(error => allMessages.push(`Error getting API responses: ${error}`));
         }
+        
+        // Save processed IDs
+        saveProcessedIds(processedMessageIds);
+        
+        // Output JSON message for Claude Code display
+        if (allMessages.length > 0) {
+          const combinedMessage = allMessages.join('\n');
+          console.log(JSON.stringify({
+            continue: false,
+            stopReason: combinedMessage
+          }));
+        }
+        
+        process.exit(0);
       }
     } catch (error) {
-      console.error('❌ Error processing hook input:', error.message);
-      // If JSON parsing fails, treat as plain text (backward compatibility)
-      if (buffer.includes(TRIGGER_PHRASE)) {
-        const matches = (buffer.match(new RegExp(TRIGGER_PHRASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-        for (let i = 0; i < matches; i++) {
-          incrementCounter('right');
-        }
-      }
-      
-      const issueMatches = buffer.match(ISSUE_PATTERN);
-      if (issueMatches && issueMatches.length > 0) {
-        incrementCounter('issue');
-      }
+      // Output JSON message for Claude Code display
+      console.log(JSON.stringify({
+          continue: false,
+          stopReason: `Failed to parse claude outputs\n${error}\n\n`
+        }));
+      process.exit(0);
     }
   });
 }
@@ -283,10 +253,16 @@ if (require.main === module) {
   
   if (args.includes('--test')) {
     console.log('🧪 Testing right counter increment...');
-    incrementCounter('right');
+    makeAPIRequest({ type: "right" }).then(() => process.exit(0)).catch((err) => {
+      console.error('Test failed:', err);
+      process.exit(1);
+    });
   } else if (args.includes('--test-issue')) {
     console.log('🧪 Testing issue counter increment...');
-    incrementCounter('issue');
+    makeAPIRequest({ type: "issue" }).then(() => process.exit(0)).catch((err) => {
+      console.error('Test failed:', err);
+      process.exit(1);
+    });
   } else if (args.includes('--help') || args.includes('-h')) {
     console.log(`
 Claude Code Hook - Claude Phrase Tracker
@@ -309,10 +285,7 @@ As Claude Code Hook:
   Configure this script as a post-output hook in your Claude Code settings.
     `);
   } else {
-    console.log('🔍 Monitoring Claude Code output for tracked phrases...');
-    console.log('   - "You\'re absolutely right!"');
-    console.log('   - Issue detection phrases');
-    console.log('   Press Ctrl+C to stop');
+    // When running as hook, no debug output - only JSON for Claude Code
     processInput();
   }
 }
